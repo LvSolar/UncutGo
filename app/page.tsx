@@ -3,7 +3,7 @@
 import { startTransition, useState } from "react";
 
 import { formatDuration } from "../lib/utils/time";
-import type { AnalysisReport, CandidateMovie } from "../types/movie";
+import type { AnalysisReport, CandidateMovie, JudgedPlatformOffer } from "../types/movie";
 
 const verdictToneClasses: Record<string, string> = {
   大概率无删减: "border-accent/30 bg-accent/10 text-accent-strong",
@@ -14,6 +14,111 @@ const verdictToneClasses: Record<string, string> = {
   信息不足: "border-black/10 bg-black/5 text-foreground/70",
 };
 
+const stateToneClasses: Record<string, string> = {
+  实时结果: "border-accent/20 bg-accent/10 text-accent-strong",
+  缓存结果: "border-line bg-white/80 text-foreground/70",
+  样例数据: "border-[#b06b20]/20 bg-[#b06b20]/10 text-[#7d470d]",
+  浏览器兜底: "border-[#446a91]/20 bg-[#446a91]/10 text-[#27496c]",
+  已获取片长: "border-accent/20 bg-accent/10 text-accent-strong",
+  真实媒体时长: "border-accent/20 bg-accent/10 text-accent-strong",
+  站内已匹配: "border-[#446a91]/20 bg-[#446a91]/10 text-[#27496c]",
+  未搜到片源: "border-black/10 bg-black/5 text-foreground/70",
+  无播放入口: "border-black/10 bg-black/5 text-foreground/70",
+  时长待确认: "border-[#b06b20]/20 bg-[#b06b20]/10 text-[#7d470d]",
+};
+
+function hasBrowserFallback(report: AnalysisReport): boolean {
+  return report.platforms.some((platform) => platform.notes?.includes("浏览器级渲染"));
+}
+
+function getReportStateBadges(report: AnalysisReport): string[] {
+  const badges = [report.status === "live" ? "实时结果" : "样例数据"];
+
+  if (report.cache === "hit") {
+    badges.push("缓存结果");
+  }
+
+  if (hasBrowserFallback(report)) {
+    badges.push("浏览器兜底");
+  }
+
+  return badges;
+}
+
+function getReportMessage(report: AnalysisReport): string {
+  if (report.status !== "live") {
+    return "当前展示的是样例数据，页面结构和判定逻辑可正常预览。";
+  }
+
+  if (report.cache === "hit") {
+    return "这次展示的是缓存结果，适合快速复看；重新抓取到新版本后会自动更新。";
+  }
+
+  return "这次展示的是实时抓取结果，已按当前可拿到的豆瓣信息和平台片长完成判断。";
+}
+
+function getPlatformState(platform: JudgedPlatformOffer): string {
+  const notes = platform.notes ?? "";
+
+  if (notes.includes("浏览器级渲染")) {
+    return "浏览器兜底";
+  }
+
+  if (platform.durationSeconds) {
+    if (notes.includes("m3u8") || notes.includes("真实媒体地址")) {
+      return "真实媒体时长";
+    }
+
+    return "已获取片长";
+  }
+
+  if (!platform.available && notes.includes("暂未找到匹配电影")) {
+    return "未搜到片源";
+  }
+
+  if (platform.available && notes.includes("暂未识别到可播放入口")) {
+    return "无播放入口";
+  }
+
+  if (platform.available || notes.includes("已定位到播放页") || notes.includes("已搜索到匹配电影")) {
+    return "时长待确认";
+  }
+
+  return "站内已匹配";
+}
+
+function getPlatformStatusText(platform: JudgedPlatformOffer): string {
+  const state = getPlatformState(platform);
+
+  switch (state) {
+    case "浏览器兜底":
+      return "已通过浏览器兜底拿到可信片长";
+    case "真实媒体时长":
+      return "已拿到真实媒体时长";
+    case "已获取片长":
+      return "已拿到可信片长";
+    case "未搜到片源":
+      return "站内暂未搜到这部电影";
+    case "无播放入口":
+      return "已找到条目，但暂未识别到可播放入口";
+    case "时长待确认":
+      return "已找到条目或播放页，正在等待更稳定的时长解析";
+    default:
+      return "已匹配到站内条目";
+  }
+}
+
+function formatGeneratedAt(value: string): string {
+  const date = new Date(value);
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [candidates, setCandidates] = useState<CandidateMovie[]>([]);
@@ -22,7 +127,7 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [message, setMessage] = useState(
-    "当前原型已经接通真实豆瓣搜索和详情解析，腾讯视频片长也开始走真实抓取。",
+    "当前原型已经接通真实豆瓣搜索和详情解析，并支持腾讯视频、哔哩哔哩、爱奇艺、优酷和 Libvio 的片长分析。",
   );
 
   async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
@@ -72,11 +177,15 @@ export default function Home() {
         setReport(data);
       });
 
-      setMessage(
-        data.status === "live"
-          ? "分析已完成。当前结果包含真实豆瓣数据，并尝试抓取腾讯视频片长。"
-          : "分析已完成。当前结果来自样例数据。",
-      );
+      if (data.status === "live") {
+        setMessage(
+          data.cache === "hit"
+            ? "分析已完成，当前展示的是缓存结果。"
+            : "分析已完成，当前展示的是本次实时抓取结果。",
+        );
+      } else {
+        setMessage("分析已完成，当前展示的是样例数据。");
+      }
     } catch {
       setMessage("分析失败了，稍后再试。");
     } finally {
@@ -95,10 +204,10 @@ export default function Home() {
             </div>
             <div className="space-y-4">
               <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-                输入电影名，判断腾讯视频和 B 站哪里更可能是无删减版。
+                输入电影名，直接看国内哪里更可能是无删减版。
               </h1>
               <p className="max-w-2xl text-base leading-8 text-muted sm:text-lg">
-                当前先优先做准：真实豆瓣搜索、版本并列展示、参考版本优先级和平台片长差值判断。
+                当前优先把结果做准：先以豆瓣版本为参考，再结合腾讯视频、哔哩哔哩、爱奇艺、优酷和 Libvio 的真实片长来判断。
               </p>
             </div>
             <form className="space-y-3" onSubmit={handleSearch}>
@@ -110,7 +219,7 @@ export default function Home() {
                   id="movie-query"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="例如：杀手没有假期 / 银翼杀手 / 豆瓣链接"
+                  placeholder="例如：教父 / 杀手没有假期 / 豆瓣链接"
                   className="min-h-14 flex-1 rounded-2xl border border-line bg-white/80 px-4 text-base outline-none ring-0 placeholder:text-muted/75 focus:border-accent focus:bg-white"
                 />
                 <button
@@ -130,10 +239,10 @@ export default function Home() {
           <div className="rounded-[1.75rem] border border-line bg-panel-strong p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
             <p className="text-sm uppercase tracking-[0.28em] text-muted">当前能力</p>
             <div className="mt-4 space-y-3 text-sm leading-7 text-foreground/80">
-              <p>1. 真实豆瓣搜索候选。</p>
-              <p>2. 真实豆瓣详情页抓取与挑战页自动通过。</p>
-              <p>3. 版本优先级判断与多版本展示。</p>
-              <p>4. 腾讯视频片长真实抓取，B 站下一步接入。</p>
+              <p>1. 真实豆瓣搜索候选与详情解析。</p>
+              <p>2. 多版本时长展示，并按优先级自动选参考版本。</p>
+              <p>3. 腾讯视频、哔哩哔哩、爱奇艺、优酷和 Libvio 片长分析。</p>
+              <p>4. 页面会区分实时结果、缓存结果、信息不足和无播放源。</p>
             </div>
             <div className="mt-6 rounded-2xl bg-[#efe2cb] px-4 py-4 text-sm leading-7 text-[#6c5636]">
               有些电影在国内没有播放源，这会作为正式结果展示，而不是当作异常报错处理。
@@ -222,6 +331,19 @@ export default function Home() {
                     豆瓣评分 {report.movie.doubanRating}
                   </div>
                 </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {getReportStateBadges(report).map((badge) => (
+                    <span
+                      key={badge}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium ${stateToneClasses[badge]}`}
+                    >
+                      {badge}
+                    </span>
+                  ))}
+                  <span className="rounded-full border border-line bg-white/80 px-3 py-1 text-xs text-foreground/70">
+                    更新于 {formatGeneratedAt(report.generatedAt)}
+                  </span>
+                </div>
                 <div className="mt-4 grid gap-3 text-sm text-foreground/80 sm:grid-cols-2">
                   <p>导演：{report.movie.director}</p>
                   <a
@@ -234,6 +356,9 @@ export default function Home() {
                   </a>
                 </div>
                 <p className="mt-4 text-sm leading-7 text-muted">{report.movie.summary}</p>
+                <p className="mt-4 rounded-2xl border border-line bg-white/75 px-4 py-3 text-sm leading-7 text-foreground/75">
+                  {getReportMessage(report)}
+                </p>
               </div>
 
               <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
@@ -295,49 +420,62 @@ export default function Home() {
                     当前没有识别到国内播放源。这种情况会被视为正式结果，而不是抓取失败。
                   </div>
                 ) : (
-                  report.platforms.map((platform) => (
-                    <div
-                      key={platform.id}
-                      className="rounded-[1.5rem] border border-line bg-white/75 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h5 className="text-lg font-semibold text-foreground">{platform.platform}</h5>
-                          <p className="mt-1 text-sm text-muted">
-                            {platform.available && platform.durationSeconds
-                              ? `片长 ${formatDuration(platform.durationSeconds)}`
-                              : "暂未拿到可信片长"}
-                          </p>
+                  report.platforms.map((platform) => {
+                    const state = getPlatformState(platform);
+
+                    return (
+                      <div
+                        key={platform.id}
+                        className="rounded-[1.5rem] border border-line bg-white/75 p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <h5 className="text-lg font-semibold text-foreground">{platform.platform}</h5>
+                            <p className="mt-1 text-sm text-muted">
+                              {platform.available && platform.durationSeconds
+                                ? `片长 ${formatDuration(platform.durationSeconds)}`
+                                : getPlatformStatusText(platform)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                stateToneClasses[state]
+                              }`}
+                            >
+                              {state}
+                            </span>
+                            <span
+                              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                                verdictToneClasses[platform.verdict]
+                              }`}
+                            >
+                              {platform.verdict}
+                            </span>
+                          </div>
                         </div>
-                        <span
-                          className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                            verdictToneClasses[platform.verdict]
-                          }`}
-                        >
-                          {platform.verdict}
-                        </span>
+                        <p className="mt-3 text-sm leading-7 text-foreground/80">{platform.reason}</p>
+                        {platform.notes ? (
+                          <p className="mt-2 text-sm leading-7 text-muted">{platform.notes}</p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+                          <span className="text-muted">
+                            {typeof platform.deltaSeconds === "number"
+                              ? `与参考版本差 ${platform.deltaSeconds} 秒`
+                              : "差值待真实抓取后更新"}
+                          </span>
+                          <a
+                            href={platform.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent-strong underline decoration-accent/30 underline-offset-4"
+                          >
+                            打开平台页面
+                          </a>
+                        </div>
                       </div>
-                      <p className="mt-3 text-sm leading-7 text-foreground/80">{platform.reason}</p>
-                      {platform.notes ? (
-                        <p className="mt-2 text-sm leading-7 text-muted">{platform.notes}</p>
-                      ) : null}
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-                        <span className="text-muted">
-                          {typeof platform.deltaSeconds === "number"
-                            ? `与参考版本差 ${platform.deltaSeconds} 秒`
-                            : "差值待真实抓取后更新"}
-                        </span>
-                        <a
-                          href={platform.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent-strong underline decoration-accent/30 underline-offset-4"
-                        >
-                          打开平台页面
-                        </a>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

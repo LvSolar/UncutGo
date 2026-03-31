@@ -5,42 +5,36 @@ import { fetchDoubanSubjectHtml } from "../../../lib/douban/client";
 import { parseDoubanMovieRecord } from "../../../lib/douban/parser";
 import { analyzeMovie } from "../../../lib/judgement";
 import { findMovieById } from "../../../lib/mock-data";
-import { fetchBilibiliDuration } from "../../../lib/platforms/bilibili";
-import { fetchTencentDuration } from "../../../lib/platforms/tencent";
+import { fetchLibvioOffer, fetchPlatformDuration } from "../../../lib/platforms";
 import type { AnalysisReport, MovieRecord } from "../../../types/movie";
 
 interface AnalyzePayload {
   movieId?: string;
 }
 
-const ANALYSIS_CACHE_VERSION = "v3";
+const ANALYSIS_CACHE_VERSION = "v12";
 
 async function enrichMovieWithPlatformDurations(movie: MovieRecord): Promise<MovieRecord> {
   const platforms = await Promise.all(
     movie.platforms.map(async (platform) => {
-      if (platform.url.includes("v.qq.com")) {
-        const runtime = await fetchTencentDuration(platform.url);
-        return {
-          ...platform,
-          ...runtime,
-        };
+      const runtime = await fetchPlatformDuration(platform.url);
+
+      if (Object.keys(runtime).length === 0) {
+        return platform;
       }
 
-      if (platform.url.includes("bilibili.com")) {
-        const runtime = await fetchBilibiliDuration(platform.url);
-        return {
-          ...platform,
-          ...runtime,
-        };
-      }
-
-      return platform;
+      return {
+        ...platform,
+        ...runtime,
+      };
     }),
   );
 
+  const libvioOffer = await fetchLibvioOffer(movie);
+
   return {
     ...movie,
-    platforms,
+    platforms: [...platforms, libvioOffer],
   };
 }
 

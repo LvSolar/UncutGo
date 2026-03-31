@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local cache
+data/cache/*
+!data/cache/.gitkeep
+
+# playwright cli
+.playwright-cli/

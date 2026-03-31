@@ -75,4 +75,6 @@ export interface AnalysisReport {
   generatedAt: string;
   caution?: string;
   status: "mock" | "live";
+  cache?: "hit" | "miss";
 }
+

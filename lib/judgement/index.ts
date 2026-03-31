@@ -18,6 +18,12 @@ const priorityByTag: Record<VersionTag, number> = {
   unknown: 0,
 };
 
+const NORMAL_TOLERANCE_SECONDS = 90;
+const SHORTER_TOLERANCE_SECONDS = 180;
+const LONGER_UNCUT_TOLERANCE_SECONDS = 180;
+const LONGER_POSSIBLY_UNCUT_TOLERANCE_SECONDS = 300;
+const POSSIBLE_CUT_SECONDS = 600;
+
 function pickPreferredVersion(versions: MovieVersion[]): MovieVersion {
   return [...versions].sort((left, right) => {
     const priorityDiff = priorityByTag[right.tag] - priorityByTag[left.tag];
@@ -63,23 +69,35 @@ function buildVerdict(
   let verdict: VerdictLabel;
   let reason: string;
 
-  if (Math.abs(deltaSeconds) <= 90) {
+  if (Math.abs(deltaSeconds) <= NORMAL_TOLERANCE_SECONDS) {
     verdict = "大概率无删减";
     reason = `与当前参考版本《${preferredVersion.label}》差异 ${Math.abs(deltaSeconds)} 秒，处于正常误差范围。`;
-  } else if (deltaSeconds < 0 && Math.abs(deltaSeconds) <= 180) {
+  } else if (deltaSeconds > 0 && deltaSeconds <= LONGER_UNCUT_TOLERANCE_SECONDS) {
+    verdict = "大概率无删减";
+    reason = `比参考版本长 ${deltaSeconds} 秒，仍像是片头片尾、平台提示或黑场带来的常见差异。`;
+  } else if (
+    deltaSeconds > LONGER_UNCUT_TOLERANCE_SECONDS &&
+    deltaSeconds <= LONGER_POSSIBLY_UNCUT_TOLERANCE_SECONDS
+  ) {
+    verdict = "可能无删减";
+    reason = `比参考版本长 ${deltaSeconds} 秒，可能包含额外片头片尾或平台附加内容，但暂时不像删减。`;
+  } else if (
+    deltaSeconds < 0 &&
+    Math.abs(deltaSeconds) <= SHORTER_TOLERANCE_SECONDS
+  ) {
     verdict = "可能无删减";
     reason = `比参考版本短 ${Math.abs(deltaSeconds)} 秒，可能只是分钟取整、片头片尾或平台展示差异。`;
   } else if (
     closestVersion &&
     closestVersion.id !== preferredVersion.id &&
-    closestDelta <= 90
+    closestDelta <= NORMAL_TOLERANCE_SECONDS
   ) {
     verdict = "版本不一致";
     reason = `它与《${closestVersion.label}》更接近，像是另一个合法发行版本而不是单纯删减。`;
-  } else if (deltaSeconds > 90) {
+  } else if (deltaSeconds > LONGER_POSSIBLY_UNCUT_TOLERANCE_SECONDS) {
     verdict = "版本不一致";
     reason = `平台时长比当前参考版本更长 ${deltaSeconds} 秒，更像是不同版本而不是删减。`;
-  } else if (Math.abs(deltaSeconds) <= 600) {
+  } else if (Math.abs(deltaSeconds) <= POSSIBLE_CUT_SECONDS) {
     verdict = "可能删减";
     reason = `比参考版本短 ${Math.abs(deltaSeconds)} 秒，已经超出常见误差范围，需要谨慎看待。`;
   } else {
