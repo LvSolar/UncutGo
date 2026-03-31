@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FindMyMovie",
-  description: "Compare movie runtimes across platforms to spot likely uncut versions.",
+  title: "UncutGo",
+  description: "输入电影名，快速比较各平台片长，判断哪里更可能是无删减版。",
 };
 
 export default function RootLayout({

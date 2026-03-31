@@ -200,7 +200,7 @@ export default function Home() {
           <div className="space-y-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-white/55 px-3 py-1 text-sm text-accent-strong">
               <span className="h-2 w-2 rounded-full bg-accent" />
-              FindMyMovie 原型
+              UncutGo
             </div>
             <div className="space-y-4">
               <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
@@ -485,4 +485,5 @@ export default function Home() {
     </main>
   );
 }
+
 
