@@ -25,6 +25,14 @@ const stateToneClasses: Record<string, string> = {
   未搜到片源: "border-black/10 bg-black/5 text-foreground/70",
   无播放入口: "border-black/10 bg-black/5 text-foreground/70",
   时长待确认: "border-[#b06b20]/20 bg-[#b06b20]/10 text-[#7d470d]",
+  豆瓣实时搜索: "border-accent/20 bg-accent/10 text-accent-strong",
+  样例候选: "border-[#b06b20]/20 bg-[#b06b20]/10 text-[#7d470d]",
+};
+
+type SearchResponse = {
+  candidates: CandidateMovie[];
+  mode?: "idle" | "live" | "mock-fallback";
+  warning?: string;
 };
 
 function hasBrowserFallback(report: AnalysisReport): boolean {
@@ -126,6 +134,8 @@ export default function Home() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [searching, setSearching] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [searchMode, setSearchMode] = useState<"live" | "mock-fallback" | null>(null);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
   const [message, setMessage] = useState(
     "当前原型已经接通真实豆瓣搜索和详情解析，并支持腾讯视频、哔哩哔哩、爱奇艺、优酷和 Libvio 的片长分析。",
   );
@@ -136,21 +146,30 @@ export default function Home() {
     setSearching(true);
     setReport(null);
     setSelectedId(null);
+    setSearchMode(null);
+    setSearchWarning(null);
     setMessage("正在查找候选电影……");
 
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-      const data = (await response.json()) as { candidates: CandidateMovie[]; mode?: string };
+      const data = (await response.json()) as SearchResponse;
       setCandidates(data.candidates);
+      setSearchMode(data.mode === "mock-fallback" ? "mock-fallback" : data.mode === "live" ? "live" : null);
+      setSearchWarning(data.warning ?? null);
 
-      if (data.candidates.length === 0) {
-        setMessage("没有找到候选电影。你可以换个关键词，或者后面再试豆瓣链接输入。");
-      } else if (data.mode === "live") {
-        setMessage("已拿到豆瓣真实候选结果，选一部继续分析吧。");
+      if (data.mode === "mock-fallback" && data.candidates.length === 0) {
+        setMessage("豆瓣实时搜索刚刚没有成功，当前样例候选里也没有这部电影。你可以稍后再试，不一定是关键词有问题。");
+      } else if (data.mode === "mock-fallback") {
+        setMessage("豆瓣实时搜索刚刚没有成功，当前先回退到样例候选结果。你仍然可以继续体验分析流程。");
+      } else if (data.candidates.length === 0) {
+        setMessage("豆瓣实时搜索已执行，但当前没有找到匹配候选。你可以换个关键词，或试试别名、原名。");
       } else {
-        setMessage("当前回退到了样例候选结果，但分析流程仍然可用。");
+        setMessage("已拿到豆瓣真实候选结果，选一部继续分析吧。");
       }
     } catch {
+      setCandidates([]);
+      setSearchMode(null);
+      setSearchWarning(null);
       setMessage("搜索失败了，稍后再试。");
     } finally {
       setSearching(false);
@@ -231,6 +250,24 @@ export default function Home() {
                 </button>
               </div>
             </form>
+            {(searchMode || searchWarning) && !report ? (
+              <div className="flex flex-wrap gap-2 text-xs">
+                {searchMode ? (
+                  <span
+                    className={`rounded-full border px-3 py-1 font-medium ${
+                      stateToneClasses[searchMode === "live" ? "豆瓣实时搜索" : "样例候选"]
+                    }`}
+                  >
+                    {searchMode === "live" ? "豆瓣实时搜索" : "样例候选"}
+                  </span>
+                ) : null}
+                {searchWarning ? (
+                  <span className="rounded-full border border-[#b06b20]/20 bg-[#b06b20]/10 px-3 py-1 font-medium text-[#7d470d]">
+                    {searchWarning}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="rounded-2xl border border-line bg-white/65 px-4 py-3 text-sm leading-7 text-muted">
               {message}
             </div>
@@ -266,7 +303,7 @@ export default function Home() {
           <div className="space-y-3">
             {candidates.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-line px-4 py-8 text-sm leading-7 text-muted">
-                先搜一部电影试试看。当前搜索会优先走豆瓣真实接口。
+                先搜一部电影试试看。当前搜索会优先走豆瓣真实接口；如果豆瓣临时不可用，页面也会明确提示你。
               </div>
             ) : (
               candidates.map((candidate) => (
@@ -485,5 +522,4 @@ export default function Home() {
     </main>
   );
 }
-
 

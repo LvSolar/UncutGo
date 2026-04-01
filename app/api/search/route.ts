@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const query = searchParams.get("q")?.trim() ?? "";
 
   if (!query) {
-    return NextResponse.json({ candidates: [] });
+    return NextResponse.json({ candidates: [], mode: "idle" });
   }
 
   try {
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
       candidates,
       mode: "live",
     });
-  } catch {
+  } catch (error) {
     const candidates = findMoviesByQuery(query).map((movie) => ({
       id: movie.id,
       title: movie.title,
@@ -34,6 +34,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       candidates,
       mode: "mock-fallback",
+      warning:
+        error instanceof Error
+          ? `豆瓣实时搜索暂时不可用：${error.message}`
+          : "豆瓣实时搜索暂时不可用。",
     });
   }
 }
