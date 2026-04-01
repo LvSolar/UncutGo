@@ -7,7 +7,7 @@ import { findMovieById } from "../../../../lib/mock-data";
 import { fetchLibvioOffer, fetchPlatformDuration } from "../../../../lib/platforms";
 import type { AnalysisReport, MovieRecord, PlatformOffer } from "../../../../types/movie";
 
-const ANALYSIS_CACHE_VERSION = "v16";
+const ANALYSIS_CACHE_VERSION = "v17";
 
 type StreamMessage = {
   type: "progress" | "complete";
@@ -222,6 +222,7 @@ export async function GET(request: Request) {
     },
   });
 }
+
 
 
 

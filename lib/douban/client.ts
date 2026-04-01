@@ -103,6 +103,15 @@ function clearPassedCookies() {
   cachedPassedCookies = null;
 }
 
+function looksLikeDoubanSubjectHtml(html: string): boolean {
+  return (
+    html.includes('property="v:itemreviewed"') ||
+    html.includes('id="content"') ||
+    html.includes("片长:") ||
+    html.includes("导演:")
+  );
+}
+
 export async function searchDoubanSuggestions(query: string): Promise<string> {
   const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(query)}`;
   const response = await fetch(url, {
@@ -117,31 +126,47 @@ export async function searchDoubanSuggestions(query: string): Promise<string> {
   return response.text();
 }
 
-async function fetchSubjectHtmlWithCookies(subjectId: string, cookies: string): Promise<Response> {
+async function fetchSubjectHtmlWithCookies(
+  subjectId: string,
+  cookies: string,
+): Promise<{ response: Response; html: string }> {
   const subjectUrl = `https://movie.douban.com/subject/${subjectId}/`;
-
-  return fetch(subjectUrl, {
+  const response = await fetch(subjectUrl, {
     headers: {
       ...browserHeaders,
       cookie: cookies,
     },
     cache: "no-store",
   });
+
+  return {
+    response,
+    html: await response.text(),
+  };
 }
 
-export async function fetchDoubanSubjectHtml(subjectId: string): Promise<string> {
-  const initialCookies = await getPassedCookies(subjectId);
-  let response = await fetchSubjectHtmlWithCookies(subjectId, initialCookies);
+export async function fetchDoubanSubjectHtml(
+  subjectId: string,
+  options?: { forceCookieRefresh?: boolean },
+): Promise<string> {
+  const initialCookies = await getPassedCookies(subjectId, options?.forceCookieRefresh);
+  let { response, html } = await fetchSubjectHtmlWithCookies(subjectId, initialCookies);
 
-  if (!response.ok) {
+  if (!response.ok || !looksLikeDoubanSubjectHtml(html)) {
     clearPassedCookies();
     const refreshedCookies = await getPassedCookies(subjectId, true);
-    response = await fetchSubjectHtmlWithCookies(subjectId, refreshedCookies);
+    const retried = await fetchSubjectHtmlWithCookies(subjectId, refreshedCookies);
+    response = retried.response;
+    html = retried.html;
   }
 
   if (!response.ok) {
     throw new Error(`豆瓣详情页请求失败：${response.status}`);
   }
 
-  return response.text();
+  if (!looksLikeDoubanSubjectHtml(html)) {
+    throw new Error("豆瓣详情页返回了不完整内容。");
+  }
+
+  return html;
 }

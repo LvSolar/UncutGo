@@ -5,7 +5,7 @@ import { getDoubanMovieRecord } from "../../../lib/douban/record-cache";
 import { findMovieById } from "../../../lib/mock-data";
 import type { MoviePreview, MovieRecord } from "../../../types/movie";
 
-const PREVIEW_CACHE_VERSION = "v1";
+const PREVIEW_CACHE_VERSION = "v2";
 
 function toMoviePreview(movie: MovieRecord): MoviePreview {
   return {
@@ -54,6 +54,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json(preview);
 }
+
 
 
 

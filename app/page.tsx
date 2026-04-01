@@ -51,7 +51,6 @@ const verdictPriority = {
   疑似删减: 0,
 } as const;
 
-const emptyPreviewMessage = "输入电影，开始这次放映前检查。";
 const platformSortOptions = [
   { id: "recommended", label: "推荐顺序" },
   { id: "delta", label: "误差最小" },
@@ -131,22 +130,34 @@ function getPlatformState(platform: JudgedPlatformOffer): string {
   return "站内已匹配";
 }
 
-function getPlatformStatusText(platform: JudgedPlatformOffer): string {
+function getPlatformQuickReason(platform: JudgedPlatformOffer): string {
   const state = getPlatformState(platform);
 
+  if (platform.durationSeconds && typeof platform.deltaSeconds === "number") {
+    if (platform.deltaSeconds === 0) {
+      return "与基准一致";
+    }
+
+    if (platform.deltaSeconds > 0) {
+      return `比基准长 ${platform.deltaSeconds} 秒`;
+    }
+
+    return `比基准短 ${Math.abs(platform.deltaSeconds)} 秒`;
+  }
+
   switch (state) {
+    case "未搜到片源":
+      return "站内未搜到片源";
+    case "无播放入口":
+      return "已找到条目，暂无播放入口";
+    case "时长待确认":
+      return "已定位条目，待解析片长";
     case "浏览器兜底":
-      return "已通过浏览器兜底拿到可信片长";
+      return "已走浏览器兜底";
     case "真实媒体时长":
       return "已拿到真实媒体时长";
     case "已获取片长":
       return "已拿到可信片长";
-    case "未搜到片源":
-      return "站内暂未搜到这部电影";
-    case "无播放入口":
-      return "已找到条目，但暂未识别到可播放入口";
-    case "时长待确认":
-      return "已定位到条目，正在等待更稳定的时长解析";
     default:
       return "已匹配到站内条目";
   }
@@ -154,6 +165,7 @@ function getPlatformStatusText(platform: JudgedPlatformOffer): string {
 
 function formatGeneratedAt(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -197,6 +209,28 @@ function getRecommendationSummary(report: AnalysisReport): {
     if (verdictGap !== 0) return verdictGap;
     return Math.abs(left.deltaSeconds ?? 999999) - Math.abs(right.deltaSeconds ?? 999999);
   });
+  const domesticPlatforms = rankedPlatforms.filter((platform) => platform.platform !== "Libvio");
+  const libvioPlatform = rankedPlatforms.find((platform) => platform.platform === "Libvio");
+
+  if (domesticPlatforms.length === 0 && libvioPlatform) {
+    if (libvioPlatform.available) {
+      return {
+        eyebrow: "推荐观看",
+        headline: "国内无播放源时，推荐 Libvio 观看",
+        body: libvioPlatform.durationSeconds
+          ? "Libvio 已找到可播放入口，这次优先推荐从 Libvio 继续看。"
+          : "Libvio 已找到可继续查看的跳转页，这次优先推荐从 Libvio 继续查。",
+        tone: "gold",
+      };
+    }
+
+    return {
+      eyebrow: "国内片源",
+      headline: "豆瓣暂无国内播放源",
+      body: "已额外检查 Libvio；无论有无片源，下方都会保留 Libvio 跳转页。",
+      tone: "slate",
+    };
+  }
 
   const positivePlatforms = rankedPlatforms.filter((platform) => verdictPriority[platform.verdict] >= 4);
   if (positivePlatforms.length > 0) {
@@ -234,6 +268,14 @@ function getRecommendationSummary(report: AnalysisReport): {
     body: "已识别的平台整体更短，建议再等等。",
     tone: "rose",
   };
+}
+
+function getPlatformActionLabel(platform: JudgedPlatformOffer): string {
+  if (platform.platform === "Libvio") {
+    return platform.available ? "打开Libvio" : "打开搜索页";
+  }
+
+  return platform.available ? "打开平台页" : "打开线索页";
 }
 
 function getVersionPriorityLabel(tag: AnalysisReport["preferredVersion"]["tag"]): string {
@@ -355,54 +397,6 @@ function ToneBadge({
   );
 }
 
-function StepGuide({ currentStep }: { currentStep: number }) {
-  const steps = [
-    { id: 1, label: "输入片名", hint: "先搜电影名或豆瓣链接" },
-    { id: 2, label: "选择电影", hint: "在候选片单里点一部" },
-    { id: 3, label: "查看结论", hint: "直接看版本依据和平台判断" },
-  ];
-
-  return (
-    <ol className="grid w-full max-w-4xl gap-2.5 md:grid-cols-3">
-      {steps.map((step) => {
-        const isActive = currentStep === step.id;
-        const isDone = currentStep > step.id;
-
-        return (
-          <li
-            key={step.id}
-            className={joinClasses(
-              "rounded-[1.05rem] border px-4 py-3 text-left",
-              isActive
-                ? "border-[#d8b56a]/34 bg-[#d8b56a]/10"
-                : isDone
-                  ? "border-emerald-400/18 bg-emerald-400/8"
-                  : "border-white/10 bg-white/[0.035]",
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className={joinClasses(
-                  "inline-flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-semibold",
-                  isActive
-                    ? "border-[#d8b56a]/45 bg-[#d8b56a]/14 text-[#f5ddb0]"
-                    : isDone
-                      ? "border-emerald-400/24 bg-emerald-400/12 text-emerald-100"
-                      : "border-white/10 bg-white/[0.04] text-white/54",
-                )}
-              >
-                {step.id}
-              </span>
-              <p className={joinClasses("text-sm font-medium", isActive || isDone ? "text-white" : "text-white/68")}>{step.label}</p>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-white/48">{step.hint}</p>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
 function CandidateSkeletonStrip() {
   return (
     <div className="stage-panel overflow-hidden rounded-[1.2rem]">
@@ -469,9 +463,6 @@ export default function Home() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [searching, setSearching] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [searchMode, setSearchMode] = useState<"live" | "mock-fallback" | null>(null);
-  const [searchWarning, setSearchWarning] = useState<string | null>(null);
-  const [stageLine, setStageLine] = useState(emptyPreviewMessage);
   const [loadingStep, setLoadingStep] = useState(0);
   const [analysisProgress, setAnalysisProgress] = useState<{ completed: number; total: number } | null>(null);
   const [platformSortMode, setPlatformSortMode] = useState<PlatformSortMode>("recommended");
@@ -487,6 +478,11 @@ export default function Home() {
 
   useEffect(() => {
     try {
+      if ("scrollRestoration" in window.history) {
+        window.history.scrollRestoration = "manual";
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+
       const stored = window.localStorage.getItem(RECENT_QUERIES_STORAGE_KEY);
       if (!stored) return;
 
@@ -669,10 +665,7 @@ export default function Home() {
     setAnalyzing(false);
     setReport(null);
     setSelectedId(null);
-    setSearchMode(null);
-    setSearchWarning(null);
     setAnalysisProgress(null);
-    setStageLine("正在翻找今晚值得开的那一版。");
 
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(normalizedQuery)}`, {
@@ -682,22 +675,8 @@ export default function Home() {
 
       startTransition(() => {
         setCandidates(data.candidates);
-        setSearchMode(data.mode === "mock-fallback" ? "mock-fallback" : data.mode === "live" ? "live" : null);
-        setSearchWarning(data.warning ?? null);
       });
       rememberRecentQuery(normalizedQuery);
-
-      if (data.mode === "mock-fallback" && data.candidates.length === 0) {
-        setStageLine("豆瓣这次有点波动，样例片单里也还没找到这部。");
-      } else if (data.mode === "mock-fallback") {
-        setStageLine("豆瓣波动中，先用样例片单继续体验这条链路。");
-      } else if (data.candidates.length === 0) {
-        setStageLine("这次没有找到合适的片名，换个别名再试试。");
-      } else if (data.candidates.length === 1) {
-        setStageLine("只找到 1 部候选，已自动开始比对。");
-      } else {
-        setStageLine(`已为你排出 ${data.candidates.length} 部候选。`);
-      }
 
       void Promise.allSettled(data.candidates.slice(0, 4).map((candidate) => loadPreview(candidate.id)));
       if (data.candidates.length === 1) {
@@ -714,10 +693,7 @@ export default function Home() {
 
       startTransition(() => {
         setCandidates([]);
-        setSearchMode(null);
-        setSearchWarning(null);
       });
-      setStageLine("搜索临时失焦了，稍后再试一次。");
     } finally {
       const isLatestSearch = searchAbortRef.current === controller;
       if (isLatestSearch) {
@@ -738,7 +714,6 @@ export default function Home() {
     analysisAbortRef.current = null;
     setAnalyzing(false);
     setAnalysisProgress(null);
-    setStageLine("已停止当前分析，换一部电影继续。");
   }
 
   async function handleAnalyze(movieId: string, options?: { force?: boolean }) {
@@ -752,11 +727,6 @@ export default function Home() {
     setSelectedId(movieId);
     setAnalyzing(true);
     setAnalysisProgress(null);
-    setStageLine(
-      shouldForce
-        ? "正在重新抓取最新版本和平台片长。"
-        : "正在把版本、平台和时长线索拼到同一张片单里。",
-    );
     void loadPreview(movieId);
     window.requestAnimationFrame(() => {
       resultSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -789,24 +759,14 @@ export default function Home() {
         setReport(data);
       });
 
-      if (data.status === "live") {
-        setStageLine(data.cache === "hit" ? "这次直接调出了缓存片单。" : "实时片单已经准备好了。");
-      } else {
-        setStageLine("样例片单已经准备好了。");
-      }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        if (runId === analysisRunIdRef.current) {
-          setStageLine("已停止当前分析，换一部电影继续。");
-        }
         return;
       }
 
       if (runId !== analysisRunIdRef.current) {
         return;
       }
-
-      setStageLine("这次比对没能收束完成，稍后再试一次。");
     } finally {
       if (analysisAbortRef.current === controller) {
         analysisAbortRef.current = null;
@@ -843,12 +803,11 @@ export default function Home() {
           ),
       )
     : [];
-  const currentGuideStep = report || analyzing || selectedId ? 3 : candidates.length > 0 || searching ? 2 : 1;
   const sortedPlatforms = report ? sortPlatforms(report.platforms, platformSortMode) : [];
   const visiblePlatforms = filterPlatforms(sortedPlatforms, platformFilterMode);
 
   return (
-    <main className="relative isolate min-h-screen cursor-none pb-12 text-white">
+    <main className="relative isolate min-h-screen overflow-x-clip cursor-none pb-12 text-white">
       <CinemaCursor />
       <ParticleBackdrop />
 
@@ -857,25 +816,23 @@ export default function Home() {
         <div className="ambient-beam absolute left-[-10%] top-[-12%] h-[28rem] w-[28rem] rounded-full bg-[#f0bb63]/10 blur-3xl" />
         <div className="ambient-beam absolute right-[-8%] top-[8%] h-[22rem] w-[22rem] rounded-full bg-[#6a1930]/24 blur-3xl" />
 
-        <div className="mx-auto max-w-7xl px-5 py-5 sm:px-8 lg:px-12 lg:py-6">
+        <div className="mx-auto max-w-6xl px-5 py-5 sm:px-8 lg:px-10 lg:py-6">
           <div className="cinema-fade-up flex flex-col items-center gap-5 text-center">
             <div className="inline-flex w-fit items-center gap-3 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/74 backdrop-blur-sm">
               <span className="h-2.5 w-2.5 rounded-full bg-[#d8b56a] shadow-[0_0_18px_rgba(216,181,106,0.85)]" />
               UncutGo
             </div>
 
-            <div className="max-w-2xl space-y-3">
-              <p className="text-[11px] uppercase tracking-[0.38em] text-white/36">放映前检查</p>
-              <p className="mx-auto max-w-xl text-sm leading-7 text-white/56">按下面三步操作，几秒内就能看到版本判断。</p>
+            <div className="mx-auto w-full max-w-[50rem] text-center">
+              <p className="step-section-title">第 1 步</p>
+              <h2 className="step-section-heading mt-2">片名 / 豆瓣链接</h2>
             </div>
 
-            <StepGuide currentStep={currentGuideStep} />
-
-            <form className="w-full max-w-3xl space-y-2.5" onSubmit={handleSearch}>
-              <label className="block text-sm font-medium tracking-[0.12em] text-white/52" htmlFor="movie-query">
-                第 1 步 片名 / 豆瓣链接
+            <form className="w-full max-w-[50rem] space-y-2.5" onSubmit={handleSearch}>
+              <label className="sr-only" htmlFor="movie-query">
+                片名 / 豆瓣链接
               </label>
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,32rem)_10.5rem] lg:justify-center">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,30rem)_10.5rem] lg:justify-center">
                 <input
                   id="movie-query"
                   list="recent-query-suggestions"
@@ -889,7 +846,7 @@ export default function Home() {
                   disabled={searching || !query.trim()}
                   className="min-h-14 rounded-[1.15rem] bg-[#d8b56a] px-5 text-base font-semibold text-[#1f1408] shadow-[0_14px_36px_rgba(216,181,106,0.22)] hover:bg-[#e4c583] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {searching ? SEARCH_STEPS[loadingStep % SEARCH_STEPS.length] : "开始放映检查"}
+                  {searching ? SEARCH_STEPS[loadingStep % SEARCH_STEPS.length] : "查询"}
                 </button>
               </div>
               <datalist id="recent-query-suggestions">
@@ -898,21 +855,6 @@ export default function Home() {
                 ))}
               </datalist>
             </form>
-
-            <div className="flex flex-wrap justify-center gap-2">
-              <ToneBadge tone="gold">豆瓣版本为基准</ToneBadge>
-              {searchMode ? (
-                <span
-                  className={joinClasses(
-                    "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-medium tracking-[0.12em] uppercase",
-                    stateToneClasses[searchMode === "live" ? "豆瓣实时搜索" : "样例候选"],
-                  )}
-                >
-                  {searchMode === "live" ? "豆瓣实时搜索" : "样例候选"}
-                </span>
-              ) : null}
-              {searchWarning ? <ToneBadge tone="slate">豆瓣暂时波动</ToneBadge> : null}
-            </div>
 
             {recentQueries.length > 0 ? (
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-white/58">
@@ -932,31 +874,32 @@ export default function Home() {
                 ))}
               </div>
             ) : null}
-
-            <p className="text-sm leading-6 text-white/62">{stageLine.trim()}</p>
           </div>
         </div>
       </section>
 
-      <section ref={candidateSectionRef} className="relative z-10 mx-auto w-full max-w-7xl px-5 py-6 sm:px-8 lg:px-12">
+      <section ref={candidateSectionRef} className="relative z-10 mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/28 to-transparent" />
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-white/38">第 2 步</p>
-            <h2 className="mt-2 font-display text-[1.8rem] leading-none tracking-[-0.01em] text-white">先选电影，再开始比对</h2>
+          <div className="mx-auto mb-4 w-full max-w-[50rem] text-center">
+            <p className="step-section-title">第 2 步</p>
+            <h2 className="step-section-heading mt-2">选择电影</h2>
+            {candidates.length > 0 ? <p className="mt-3 text-sm text-white/50">{candidates.length} 部候选</p> : null}
           </div>
-          {candidates.length > 0 ? <ToneBadge tone="slate">{candidates.length} 部候选</ToneBadge> : null}
-        </div>
         <div className="mb-4 h-px bg-gradient-to-r from-white/12 via-white/6 to-transparent" />
 
         {searching ? (
-          <CandidateSkeletonStrip />
+          <div className="mx-auto w-full max-w-[50rem]">
+            <CandidateSkeletonStrip />
+          </div>
         ) : candidates.length === 0 ? (
-          <div className="stage-panel rounded-[1.4rem] border border-dashed border-white/12 px-5 py-6 text-sm text-white/56">
-            输入电影，开始这次放映前检查。
+          <div className="mx-auto w-full max-w-[50rem]">
+            <div className="stage-panel rounded-[1.4rem] border border-dashed border-white/12 px-5 py-6 text-sm text-white/56">
+              输入电影，开始这次放映前检查。
+            </div>
           </div>
         ) : (
-          <div className="stage-panel overflow-hidden rounded-[1.2rem]">
+          <div className="mx-auto w-full max-w-[50rem]">
+            <div className="stage-panel overflow-hidden rounded-[1.2rem]">
             {candidates.map((candidate) => {
               const preview = previews[candidate.id];
               const isSelected = selectedId === candidate.id;
@@ -1002,18 +945,17 @@ export default function Home() {
                 </button>
               );
             })}
+            </div>
           </div>
         )}
       </section>
 
-      <section ref={resultSectionRef} className="relative z-10 mx-auto w-full max-w-7xl px-5 pb-8 sm:px-8 lg:px-12">
+      <section ref={resultSectionRef} className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-8 sm:px-6 lg:px-8">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/30 to-transparent" />
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-white/38">第 3 步</p>
-            <h2 className="mt-2 font-display text-[1.8rem] leading-none tracking-[-0.01em] text-white">版本依据与平台判断</h2>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="mx-auto mb-4 w-full max-w-[50rem] text-center">
+          <p className="step-section-title">第 3 步</p>
+          <h2 className="step-section-heading mt-2">时长对比</h2>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
             {selectedId ? (
               <button
                 type="button"
@@ -1121,14 +1063,16 @@ export default function Home() {
                 </section>
 
                 <section className="stage-panel rounded-[1.35rem] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-sm uppercase tracking-[0.24em] text-white/42">版本依据</h4>
-                    <ToneBadge tone="gold">当前基准</ToneBadge>
-                  </div>
+                  <h4 className="text-sm uppercase tracking-[0.24em] text-white/42">版本依据</h4>
                   <div className="mt-3 h-px bg-gradient-to-r from-white/10 via-white/4 to-transparent" />
                   <div className="mt-3 rounded-[1.1rem] border border-[#d8b56a]/18 bg-[#d8b56a]/8 p-4">
-                    <p className="text-sm text-white/46">{report.preferredVersion.source}</p>
-                    <p className="mt-2 text-[1.7rem] font-semibold leading-none text-white">{report.preferredVersion.label}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ToneBadge tone="gold">当前基准</ToneBadge>
+                      <p className="min-w-0 text-sm text-white/46">{report.preferredVersion.source}</p>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-[1.7rem] font-semibold leading-tight text-white">{report.preferredVersion.label}</p>
+                    </div>
                     <p className="mt-2 text-sm text-white/72">时长 {formatDuration(report.preferredVersion.durationSeconds)}</p>
                     <p className="mt-2.5 text-sm leading-6 text-[#f1ddb1]">
                       {getPreferredVersionReason(report.preferredVersion, report.alternateVersions)}
@@ -1199,39 +1143,32 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="mt-3 overflow-hidden rounded-[1.1rem] border border-white/10 bg-white/[0.025]">
-                      <div className="hidden grid-cols-[minmax(0,1.2fr)_1fr_0.85fr_0.9fr_auto] gap-4 border-b border-white/8 px-4 py-3 text-[11px] uppercase tracking-[0.22em] text-white/34 md:grid">
+                      <div className="hidden grid-cols-[minmax(0,1.35fr)_0.85fr_0.9fr_auto] gap-4 border-b border-white/8 px-4 py-3 text-[11px] uppercase tracking-[0.22em] text-white/34 md:grid">
                         <span>平台</span>
-                        <span>状态</span>
                         <span>片长</span>
                         <span>判断</span>
                         <span className="text-right">操作</span>
                       </div>
                       {visiblePlatforms.map((platform) => {
                         const state = getPlatformState(platform);
-                        const statusText =
-                          analyzing && !platform.durationSeconds ? "抓取中" : getPlatformStatusText(platform);
                         const durationText = platform.durationSeconds ? formatDuration(platform.durationSeconds) : "待确认";
 
                         return (
                           <article
                             key={platform.id}
-                            className="grid gap-3 border-b border-white/8 px-4 py-3.5 last:border-b-0 md:grid-cols-[minmax(0,1.2fr)_1fr_0.85fr_0.9fr_auto] md:items-center"
+                            className="grid gap-3 border-b border-white/8 px-4 py-3.5 last:border-b-0 md:grid-cols-[minmax(0,1.35fr)_0.85fr_0.9fr_auto] md:items-center"
                           >
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <h5 className="text-base font-semibold text-white">{platform.platform}</h5>
+                                <span className={joinClasses("rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em]", stateToneClasses[analyzing && !platform.durationSeconds ? "分析中" : state])}>
+                                  {analyzing && !platform.durationSeconds ? "分析中" : state}
+                                </span>
                                 <span className="md:hidden rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-white/45">
                                   {durationText}
                                 </span>
                               </div>
-                              <p className="mt-1 max-w-3xl text-sm leading-6 text-white/62">{platform.reason}</p>
-                            </div>
-                            <div className="flex items-center gap-2 md:block">
-                              <span className="text-[10px] uppercase tracking-[0.18em] text-white/34 md:hidden">状态</span>
-                              <span className={joinClasses("rounded-full border px-3 py-1 text-[11px] font-medium tracking-[0.12em] uppercase", stateToneClasses[analyzing && !platform.durationSeconds ? "分析中" : state])}>
-                                {analyzing && !platform.durationSeconds ? "分析中" : state}
-                              </span>
-                              <p className="mt-1 text-sm text-white/52 md:mt-2">{statusText}</p>
+                              <p className="mt-1 text-sm leading-6 text-white/62">{getPlatformQuickReason(platform)}</p>
                             </div>
                             <div className="flex items-center gap-2 text-sm text-white/72 md:block md:text-base">
                               <span className="text-[10px] uppercase tracking-[0.18em] text-white/34 md:hidden">片长</span>
@@ -1245,7 +1182,7 @@ export default function Home() {
                             </div>
                             <div className="flex justify-end">
                               <a href={platform.url} target="_blank" rel="noreferrer" className="text-sm text-[#f0d79f] hover:text-[#f5e4bb]">
-                                打开
+                                {getPlatformActionLabel(platform)}
                               </a>
                             </div>
                           </article>
@@ -1262,6 +1199,8 @@ export default function Home() {
     </main>
   );
 }
+
+
 
 
 

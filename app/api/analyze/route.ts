@@ -12,7 +12,7 @@ interface AnalyzePayload {
   force?: boolean;
 }
 
-const ANALYSIS_CACHE_VERSION = "v16";
+const ANALYSIS_CACHE_VERSION = "v17";
 
 function appendPlatformNote(platform: PlatformOffer, note: string): string {
   return [platform.notes, note].filter(Boolean).join(" ");
@@ -113,6 +113,7 @@ export async function POST(request: Request) {
     cache: "miss",
   });
 }
+
 
 
 

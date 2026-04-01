@@ -126,6 +126,10 @@ export function analyzeMovie(movie: MovieRecord): AnalysisReport {
   const highPriorityVersions = movie.versions.filter(
     (version) => priorityByTag[version.tag] >= 3,
   );
+  const domesticPlatforms = movie.platforms.filter(
+    (platform) => platform.platform !== "Libvio",
+  );
+  const libvioOffer = movie.platforms.find((platform) => platform.platform === "Libvio");
 
   return {
     movie,
@@ -136,8 +140,10 @@ export function analyzeMovie(movie: MovieRecord): AnalysisReport {
     caution:
       highPriorityVersions.length > 1
         ? "检测到多个高优先级版本，当前默认按导演剪辑版 / 电影节版 / 国际版优先，同优先级再选更长版本。"
-        : movie.platforms.length === 0
-          ? "这部电影当前没有识别到国内播放源，后续可以考虑补站外搜索作为兜底。"
+        : domesticPlatforms.length === 0
+          ? libvioOffer?.available
+            ? "豆瓣当前没有识别到国内播放源，已额外补查 Libvio；你可以继续从下方 Libvio 跳转页确认。"
+            : "豆瓣当前没有识别到国内播放源，已额外检查 Libvio；下方会保留 Libvio 跳转页。"
           : undefined,
     status: "mock",
   };
