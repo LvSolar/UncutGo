@@ -29,6 +29,7 @@ export async function GET(request: Request) {
       director: movie.director,
       doubanRating: movie.doubanRating,
       doubanUrl: movie.doubanUrl,
+      posterUrl: movie.posterUrl,
     }));
 
     return NextResponse.json({

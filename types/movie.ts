@@ -46,6 +46,7 @@ export interface MovieRecord {
   director: string;
   doubanRating: number;
   doubanUrl: string;
+  posterUrl?: string;
   summary: string;
   versions: MovieVersion[];
   platforms: PlatformOffer[];
@@ -59,6 +60,19 @@ export interface CandidateMovie {
   director: string;
   doubanRating?: number;
   doubanUrl: string;
+  posterUrl?: string;
+}
+
+export interface MoviePreview {
+  id: string;
+  title: string;
+  originalTitle: string;
+  year: number;
+  director: string;
+  doubanRating: number;
+  doubanUrl: string;
+  summary: string;
+  posterUrl?: string;
 }
 
 export interface JudgedPlatformOffer extends PlatformOffer {
@@ -77,4 +91,3 @@ export interface AnalysisReport {
   status: "mock" | "live";
   cache?: "hit" | "miss";
 }
-

@@ -14,6 +14,7 @@ interface SuggestionItem {
   year?: string;
   url?: string;
   type?: string;
+  img?: string;
 }
 
 function parseDurationLabelToSeconds(label: string): number | null {
@@ -31,11 +32,50 @@ function parseDurationLabelToSeconds(label: string): number | null {
   return null;
 }
 
+function extractRuntimeParts(runtimeText: string): { runtimeLabel: string; note?: string } {
+  const cleaned = runtimeText.replace(/\s+/g, " ").trim();
+  const match = cleaned.match(/^(.*?分钟)(?:[（(]([^（）()]+)[)）])?$/);
+
+  if (!match) {
+    return { runtimeLabel: cleaned };
+  }
+
+  return {
+    runtimeLabel: match[1].trim(),
+    note: match[2]?.trim() || undefined,
+  };
+}
+
+function parseRuntimeVariants(rawText: string, sourceIdPrefix: string): MovieVersion[] {
+  const normalized = rawText.replace(/^片长:\s*/, "").trim();
+
+  return normalized
+    .split(/\s*\/\s*/)
+    .map((segment, index) => {
+      const { runtimeLabel, note } = extractRuntimeParts(segment);
+      const seconds = parseDurationLabelToSeconds(runtimeLabel);
+
+      if (!seconds) {
+        return null;
+      }
+
+      return {
+        id: `${sourceIdPrefix}-${index + 1}`,
+        label: note ? `${runtimeLabel}(${note})` : runtimeLabel,
+        durationSeconds: seconds,
+        source: "豆瓣详情页",
+        tag: mapVersionTag(note || runtimeLabel),
+        notes: note || undefined,
+      } satisfies MovieVersion;
+    })
+    .filter(Boolean) as MovieVersion[];
+}
+
 function mapVersionTag(label: string): MovieVersion["tag"] {
   if (label.includes("导演剪辑")) return "director-cut";
-  if (label.includes("电影节") || label.includes("节展")) return "festival";
+  if (label.includes("电影节") || label.includes("节展") || label.includes("威尼斯") || label.includes("柏林") || label.includes("戛纳")) return "festival";
   if (label.includes("中国大陆") || label.includes("内地")) return "mainland";
-  if (label.includes("国际") || label.includes("美国") || label.includes("英国")) return "international";
+  if (label.includes("国际") || label.includes("美国") || label.includes("英国") || label.includes("香港") || label.includes("台湾")) return "international";
   if (label.includes("加长")) return "extended";
   if (label.includes("修复")) return "restored";
   return "unknown";
@@ -47,6 +87,22 @@ function normalizePlatformUrl(rawUrl: string | undefined): string {
   if (rawUrl.startsWith("https://www.douban.com/link2/?url=")) {
     const parsed = new URL(rawUrl);
     return parsed.searchParams.get("url") ?? rawUrl;
+  }
+
+  return rawUrl;
+}
+
+function normalizeImageUrl(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  if (rawUrl.startsWith("//")) {
+    return `https:${rawUrl}`;
+  }
+
+  if (rawUrl.startsWith("http://")) {
+    return rawUrl.replace("http://", "https://");
   }
 
   return rawUrl;
@@ -72,6 +128,7 @@ export function parseSuggestionCandidates(rawJson: string): CandidateMovie[] {
       year: Number(item.year ?? 0),
       director: "待从详情页获取",
       doubanUrl: item.url ?? `https://movie.douban.com/subject/${item.id}/`,
+      posterUrl: normalizeImageUrl(item.img),
     }));
 }
 
@@ -84,16 +141,16 @@ export function parseDoubanMovieRecord(subjectId: string, html: string): MovieRe
   const ratingText = $("strong[property='v:average']").first().text().trim();
   const summary = $("span[property='v:summary']").text().replace(/\s+/g, " ").trim();
   const originalTitleLine = infoLines.find((line) => line.startsWith("原名:"));
+  const posterUrl = normalizeImageUrl(
+    $("#mainpic img").attr("src") ?? $("#mainpic img").attr("data-src"),
+  );
 
   const runtimeNodes = $("#info span[property='v:runtime']");
-  const versions = runtimeNodes
+  const versionsFromNodes = runtimeNodes
     .map((index, element) => {
-      const runtime = $(element).text().trim();
-      const contentValue = $(element).attr("content")?.trim();
-      const parentHtml = $(element).parent().html() ?? "";
-      const noteMatch = parentHtml.match(/<br>\s*([^<]+)/);
-      const note = noteMatch?.[1]?.trim() ?? contentValue ?? "";
-      const seconds = parseDurationLabelToSeconds(runtime);
+      const rawRuntime = $(element).text().trim();
+      const { runtimeLabel, note } = extractRuntimeParts(rawRuntime);
+      const seconds = parseDurationLabelToSeconds(runtimeLabel);
 
       if (!seconds) {
         return null;
@@ -101,10 +158,10 @@ export function parseDoubanMovieRecord(subjectId: string, html: string): MovieRe
 
       return {
         id: `runtime-${index + 1}`,
-        label: note ? `${runtime} / ${note}` : runtime,
+        label: note ? `${runtimeLabel}(${note})` : runtimeLabel,
         durationSeconds: seconds,
         source: "豆瓣详情页",
-        tag: mapVersionTag(note || runtime),
+        tag: mapVersionTag(note || runtimeLabel),
         notes: note || undefined,
       } satisfies MovieVersion;
     })
@@ -127,9 +184,21 @@ export function parseDoubanMovieRecord(subjectId: string, html: string): MovieRe
     .get();
 
   const fallbackRuntimeText = infoLines.find((line) => line.startsWith("片长:"));
+  const versionsFromLine = fallbackRuntimeText
+    ? parseRuntimeVariants(fallbackRuntimeText, "runtime-line")
+    : [];
   const fallbackSeconds = fallbackRuntimeText
     ? parseDurationLabelToSeconds(fallbackRuntimeText)
     : null;
+
+  const versions = [...versionsFromNodes, ...versionsFromLine].filter(
+    (version, index, list) =>
+      list.findIndex(
+        (candidate) =>
+          candidate.label === version.label &&
+          candidate.durationSeconds === version.durationSeconds,
+      ) === index,
+  );
 
   const safeVersions: MovieVersion[] =
     versions.length > 0
@@ -153,6 +222,7 @@ export function parseDoubanMovieRecord(subjectId: string, html: string): MovieRe
     director: director || "待确认",
     doubanRating: Number(ratingText || 0),
     doubanUrl: `https://movie.douban.com/subject/${subjectId}/`,
+    posterUrl,
     summary: summary || "豆瓣简介暂未解析到。",
     versions: safeVersions,
     platforms,

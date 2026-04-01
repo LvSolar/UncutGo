@@ -5,6 +5,9 @@ const browserHeaders = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
   "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
 };
+const PASSED_COOKIE_TTL_MS = 10 * 60 * 1000;
+
+let cachedPassedCookies: { value: string; expiresAt: number } | null = null;
 
 function sha512(value: string): string {
   return createHash("sha512").update(value).digest("hex");
@@ -23,7 +26,7 @@ function solveChallenge(cha: string, difficulty = 4): number {
   }
 }
 
-async function getPassedCookies(subjectId: string): Promise<string> {
+async function requestPassedCookies(subjectId: string): Promise<string> {
   const subjectUrl = `https://movie.douban.com/subject/${subjectId}/`;
   const firstResponse = await fetch(subjectUrl, {
     headers: browserHeaders,
@@ -82,6 +85,24 @@ async function getPassedCookies(subjectId: string): Promise<string> {
   return [bidCookie, ...secCookies].join("; ");
 }
 
+async function getPassedCookies(subjectId: string, forceRefresh = false): Promise<string> {
+  if (!forceRefresh && cachedPassedCookies && cachedPassedCookies.expiresAt > Date.now()) {
+    return cachedPassedCookies.value;
+  }
+
+  const cookies = await requestPassedCookies(subjectId);
+  cachedPassedCookies = {
+    value: cookies,
+    expiresAt: Date.now() + PASSED_COOKIE_TTL_MS,
+  };
+
+  return cookies;
+}
+
+function clearPassedCookies() {
+  cachedPassedCookies = null;
+}
+
 export async function searchDoubanSuggestions(query: string): Promise<string> {
   const url = `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(query)}`;
   const response = await fetch(url, {
@@ -96,16 +117,27 @@ export async function searchDoubanSuggestions(query: string): Promise<string> {
   return response.text();
 }
 
-export async function fetchDoubanSubjectHtml(subjectId: string): Promise<string> {
-  const cookies = await getPassedCookies(subjectId);
+async function fetchSubjectHtmlWithCookies(subjectId: string, cookies: string): Promise<Response> {
   const subjectUrl = `https://movie.douban.com/subject/${subjectId}/`;
-  const response = await fetch(subjectUrl, {
+
+  return fetch(subjectUrl, {
     headers: {
       ...browserHeaders,
       cookie: cookies,
     },
     cache: "no-store",
   });
+}
+
+export async function fetchDoubanSubjectHtml(subjectId: string): Promise<string> {
+  const initialCookies = await getPassedCookies(subjectId);
+  let response = await fetchSubjectHtmlWithCookies(subjectId, initialCookies);
+
+  if (!response.ok) {
+    clearPassedCookies();
+    const refreshedCookies = await getPassedCookies(subjectId, true);
+    response = await fetchSubjectHtmlWithCookies(subjectId, refreshedCookies);
+  }
 
   if (!response.ok) {
     throw new Error(`豆瓣详情页请求失败：${response.status}`);
